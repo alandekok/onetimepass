@@ -1,0 +1,251 @@
+#!/usr/bin/perl
+
+our $VERSION = '0.00';
+
+use strict;
+use Getopt::Mixed "nextOption";
+use Authen::OATH;
+use Config::General qw(ParseConfig);
+use Pod::Usage;
+
+use constant EXAMPLE_CONFIG => "# onetimepass configuration file\n# Try `onetimepass --man' for full documentation\n#\n# mail\@example.com	MYSECRET\n";
+use constant DEFAULT_CONFIG_FILE => $ENV{'HOME'} . "/.onetimepassrc";
+Getopt::Mixed::init("s=s secret>s l loop>l d=i delay>d h help>h usage>h m man>m hmac c=i counter>c t=i time>t n next>n f=s file>f");
+my $config_file = DEFAULT_CONFIG_FILE;
+my %accs;
+my $inf_loop = 0;
+my $delay = 5;
+my $oath = Authen::OATH->new();
+my $hmac = 0;
+my $counter = 0;
+my $stamp = time();
+my $calc_next = 0;
+
+while (my ($option, $value) = nextOption()) {
+	if ($option eq 's') {
+		$accs{$value} = $value;
+	}
+	elsif ($option eq 'hmac') {
+		$hmac = 1;
+	}
+	elsif ($option eq 't') {
+		$stamp = $value;
+	}
+	elsif ($option eq 'c') {
+		$counter = $value;
+	}
+	elsif ($option eq 'd') {
+		$delay = $value;
+	}
+	elsif ($option eq 'l') {
+		$inf_loop = 1;
+	}
+	elsif ($option eq 'n') {
+		$calc_next = 1;
+	}
+	elsif ($option eq 'h') {
+		pod2usage({-verbose=>1,-exitval=>0,-noperldoc=>1});
+	}
+	elsif ($option eq 'm') {
+		pod2usage({-verbose=>2,-exitval=>0,-noperldoc=>1});
+	}
+	elsif ($option eq 'f') {
+		$config_file = $value;
+	}
+}
+Getopt::Mixed::cleanup();
+
+if (-e $config_file) {
+	# loading secrets from file
+	%accs = ParseConfig($config_file) if not keys %accs;
+}
+elsif ($config_file eq DEFAULT_CONFIG_FILE) {
+	# creating default configuration file
+	open CONF, '>' . $config_file or die $!;
+	print CONF EXAMPLE_CONFIG;
+	close CONF;
+	chmod 0600, $config_file;
+}
+else {
+	Getopt::Mixed::abortMsg("'$config_file' file not found");
+}
+
+if (not keys %accs) {
+	Getopt::Mixed::abortMsg("secret not defined");
+}
+
+# this code is stolen from Convert::Base32
+my @syms = ( 'a'..'z', '2'..'7' );
+my @char2bits;
+for (0..$#syms) {
+    my $sym = $syms[$_];
+    my $bin = sprintf('%05b', $_);
+    $char2bits[ ord lc $sym ] = $bin;
+    $char2bits[ ord uc $sym ] = $bin;
+}
+
+sub decode_base32 {
+    $_[0] =~ tr/a-zA-Z2-7//c and die('Data contains non-base32 characters');
+    my $str;
+    if (length($_[0]) < 8*1024) {
+	$str = join '', @char2bits[ unpack 'C*', $_[0] ];
+    } else {
+	# Slower, but uses less memory
+	($str = $_[0]) =~ s/(.)/$char2bits[ord($1)]/sg;
+    }
+    my $padding = length($str) % 8;
+    $padding < 5 or die ('Length of data invalid');
+    $str =~ s/0{$padding}\z// or die ('Padding bits at the end of output buffer are not all zero');
+    return pack('B*', $str);
+}
+# end of Convert::Base32 code
+
+# and here we are calculating our TOTP/HOTP tokens 
+while (1) {	
+	foreach my $acc (keys %accs) {
+		if (not $hmac) { # using time based alg.
+			my $totp = $oath->totp(decode_base32($accs{$acc}), $stamp);
+			print "$acc: $totp";
+			if ($calc_next) {
+				# calculating next TOTP token
+				my $next_totp = $totp;
+				my $offset = 0;
+				while ($next_totp eq $totp) {
+					$offset++;
+					$next_totp = $oath->totp(decode_base32($accs{$acc}), $stamp + $offset);
+				}
+				print " > $next_totp ($offset)";
+			}
+			print "\n";
+		}
+		else { # using hmac based alg.
+			my $hotp = $oath->hotp(decode_base32($accs{$acc}), $counter);
+			print "$acc: $hotp\n";
+		}
+	}
+	exit(0) if not $inf_loop;
+	sleep($delay);
+	$stamp = time();
+}
+
+__END__
+
+=head1 NAME
+
+onetimepass - one-time password generator
+
+=head1 SYNOPSIS
+
+onetimepass [options]
+
+=head1 DESCRIPTION
+
+onetimepass is a perl script for calculating TOTP (Time-based One-time Password Algorithm)
+and HOTP (HMAC-Based One-Time Password Algorithm) tokens.
+One can use this script to sign in to some application that uses
+2-step verification (e.g. google, dropbox etc.)
+
+=head1 OPTIONS
+
+=over
+
+=item B<-c>,B<--counter> I<counter>
+
+HOTP counter (default is 0)
+
+=item B<-d>,B<--delay> I<delay>
+
+Delay between iterations in second (used with '--loop' option, default is 5)
+
+=item B<-f>,B<--file> I<file>
+
+Use I<file> configuration file instead of '~/.onetimepassrc'
+
+=item B<-h>,B<--help>,B<--usage>
+
+Show a 'Usage' message
+
+=item B<--hmac>
+
+Use HOTP instead of TOTP
+
+=item B<-l>,B<--loop>
+
+Calculate TOTP tokens in continuous loop
+
+=item B<-m>,B<--man>
+
+Show complete manual
+
+=item B<-n>,B<--next>
+
+Calculate next TOTP token too
+
+=item B<-s>,B<--secret> I<SECRET>
+
+Use I<SECRET> instead of secrets in the configuration file.
+I<SECRET> must be base32 encoded string.
+You can get your I<SECRET> while setting up 2-step verification
+for your accounts (e.g. google, dropbox etc.)
+
+=item B<-t>,B<--time> I<time>
+
+Calculate TOTP token using specified unix I<time> instead of current time
+
+=back
+
+=head1 CONFIGURATION FILE
+
+You may define a 'F<~/.onetimepassrc>' file with your secrets:
+
+=over
+
+I<NAME>  I<SECRET>
+
+=back
+
+e.g.:
+
+    # my e-mail account
+    mail@example.com	MYSECRET
+    # another account
+    anotheraccount	MYSECRET
+    
+=head1 EXAMPLE
+
+    $ perl onetimepass -s MYSECRET --next --loop --delay 1
+    $ perl onetimepass -s MYSECRET --hmac --counter 42
+    $ ./onetimepass -n
+
+=head1 DEPENDENCIES
+
+B<Debian/Ubuntu (12.10 and newer)>
+
+    $ sudo apt-get install libauthen-oath-perl libgetopt-mixed-perl libconfig-general-perl
+
+B<Ubuntu (12.04 and older)>
+
+    $ sudo apt-get install libgetopt-mixed-perl libconfig-general-perl libdigest-hmac-perl libmoose-perl
+    $ wget http://launchpadlibrarian.net/103790872/libauthen-oath-perl_1.0.0-1_all.deb
+    $ sudo dpkg -i libauthen-oath-perl_1.0.0-1_all.deb
+
+B<using CPAN client>
+
+    $ cpan
+    > install Authen::OATH
+    > install Getopt::Mixed
+    > install Config::General
+
+=head1 SEE ALSO
+
+Documentation for the L<Authen::OATH> module
+
+Time-based One-time Password Algorithm L<http://tools.ietf.org/html/rfc6238>
+
+HMAC-Based One-Time Password Algorithm L<http://tools.ietf.org/html/rfc4226>
+
+=head1 AUTHOR
+
+written by malyavka just for fun
+
+=cut

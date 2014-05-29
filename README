@@ -1,0 +1,95 @@
+NAME
+    onetimepass - one-time password generator
+
+SYNOPSIS
+    onetimepass [options]
+
+DESCRIPTION
+    onetimepass is a perl script for calculating TOTP (Time-based One-time
+    Password Algorithm) and HOTP (HMAC-Based One-Time Password Algorithm)
+    tokens. One can use this script to sign in to some application that uses
+    2-step verification (e.g. google, dropbox etc.)
+
+OPTIONS
+    -c,--counter *counter*
+        HOTP counter (default is 0)
+
+    -d,--delay *delay*
+        Delay between iterations in second (used with '--loop' option,
+        default is 5)
+
+    -f,--file *file*
+        Use *file* configuration file instead of '~/.onetimepassrc'
+
+    -h,--help,--usage
+        Show a 'Usage' message
+
+    --hmac
+        Use HOTP instead of TOTP
+
+    -l,--loop
+        Calculate TOTP tokens in continuous loop
+
+    -m,--man
+        Show complete manual
+
+    -n,--next
+        Calculate next TOTP token too
+
+    -s,--secret *SECRET*
+        Use *SECRET* instead of secrets in the configuration file. *SECRET*
+        must be base32 encoded string. You can get your *SECRET* while
+        setting up 2-step verification for your accounts (e.g. google,
+        dropbox etc.)
+
+    -t,--time *time*
+        Calculate TOTP token using specified unix *time* instead of current
+        time
+
+CONFIGURATION FILE
+    You may define a '~/.onetimepassrc' file with your secrets:
+
+        *NAME* *SECRET*
+
+    e.g.:
+
+        # my e-mail account
+        mail@example.com    MYSECRET
+        # another account
+        anotheraccount      MYSECRET
+
+EXAMPLE
+        $ perl onetimepass -s MYSECRET --next --loop --delay 1
+        $ perl onetimepass -s MYSECRET --hmac --counter 42
+        $ ./onetimepass -n
+
+DEPENDENCIES
+    Debian/Ubuntu (12.10 and newer)
+
+        $ sudo apt-get install libauthen-oath-perl libgetopt-mixed-perl libconfig-general-perl
+
+    Ubuntu (12.04 and older)
+
+        $ sudo apt-get install libgetopt-mixed-perl libconfig-general-perl libdigest-hmac-perl libmoose-perl
+        $ wget http://launchpadlibrarian.net/103790872/libauthen-oath-perl_1.0.0-1_all.deb
+        $ sudo dpkg -i libauthen-oath-perl_1.0.0-1_all.deb
+
+    using CPAN client
+
+        $ cpan
+        > install Authen::OATH
+        > install Getopt::Mixed
+        > install Config::General
+
+SEE ALSO
+    Documentation for the Authen::OATH module
+
+    Time-based One-time Password Algorithm
+    <http://tools.ietf.org/html/rfc6238>
+
+    HMAC-Based One-Time Password Algorithm
+    <http://tools.ietf.org/html/rfc4226>
+
+AUTHOR
+    written by malyavka just for fun
+
